@@ -3,7 +3,7 @@ bl_info = {
     'name': 'WarCraft 3 .mdx importer',
     'author': 'Torenjk, Pavel_Blend',
     'version': (1, 0, 0),
-    'blender': (2, 80, 0),
+    'blender': (4, 0, 0),
     'category': 'Import-Export',
     'location': 'File > Import',
     'description': 'Import *.mdx files (3d models of WarCraft 3)',
