@@ -12,11 +12,21 @@ def load_warcraft_3_model(model, importProperties):
 
 
 def create_mesh_objects(model, setTeamColor):
-    preferences = bpy.context.user_preferences.addons['io_scene_warcraft_3'].preferences
-    resourceFolder = preferences.resourceFolder
-    alternativeResourceFolder = preferences.alternativeResourceFolder
-    textureExc = preferences.textureExtension
-    if textureExc[0] != '.':
+    preferences = bpy.context.preferences.addons['io_scene_warcraft_3'].preferences
+    
+    # Safely get string properties
+    resourceFolder = getattr(preferences, 'resourceFolder', '')
+    alternativeResourceFolder = getattr(preferences, 'alternativeResourceFolder', '')
+    textureExc = getattr(preferences, 'textureExtension', '')
+    
+    # Ensure they are strings (handle potential PropertyDeferred objects)
+    resourceFolder = str(resourceFolder) if resourceFolder else ''
+    alternativeResourceFolder = str(alternativeResourceFolder) if alternativeResourceFolder else ''
+    textureExc = str(textureExc) if textureExc else 'png' # Default fallback
+
+    if not textureExc:
+         textureExc = '.png'
+    elif textureExc[0] != '.':
         textureExc = '.' + textureExc
     model.normalize_meshes_names()
     bpyImages = []
@@ -42,24 +52,38 @@ def create_mesh_objects(model, setTeamColor):
             bpyImagesOfLayer.append(bpyImages[layer.texture_id])
         materialName = bpyImagesOfLayer[-1].filepath.split('\\')[-1].split('.')[0]
         bpyMaterial = bpy.data.materials.new(name=materialName)
-        bpyMaterial.use_shadeless = True
-        bpyMaterial.use_object_color = True
-        bpyMaterial.diffuse_color = (1.0, 1.0, 1.0)
-        textureSlotIndex = 0
-        for bpyImage in bpyImagesOfLayer:
-            bpyMaterial.texture_slots.add()
-            bpyTexture = bpy.data.textures.new(name=materialName, type='IMAGE')
-            bpyMaterial.texture_slots[textureSlotIndex].texture = bpyTexture
-            textureSlotIndex += 1
-            bpyTexture.image = bpyImage
+        bpyMaterial.use_nodes = True
+        bsdf = bpyMaterial.node_tree.nodes.get('Principled BSDF')
+        if not bsdf:
+            bsdf = bpyMaterial.node_tree.nodes.new('ShaderNodeBsdfPrincipled')
+        
+        # Handle alpha properly for Eevee
+        bpyMaterial.blend_method = 'BLEND'
+        
+        if bpyImagesOfLayer:
+            texImage = bpyMaterial.node_tree.nodes.new('ShaderNodeTexImage')
+            texImage.image = bpyImagesOfLayer[-1]
+            
+            objInfo = bpyMaterial.node_tree.nodes.new('ShaderNodeObjectInfo')
+            mixRGB = bpyMaterial.node_tree.nodes.new('ShaderNodeMixRGB')
+            mixRGB.blend_type = 'MULTIPLY'
+            mixRGB.inputs[0].default_value = 1.0
+            
+            bpyMaterial.node_tree.links.new(objInfo.outputs['Color'], mixRGB.inputs[1])
+            bpyMaterial.node_tree.links.new(texImage.outputs['Color'], mixRGB.inputs[2])
+            
+            bpyMaterial.node_tree.links.new(mixRGB.outputs['Color'], bsdf.inputs['Base Color'])
+            bpyMaterial.node_tree.links.new(texImage.outputs['Alpha'], bsdf.inputs['Alpha'])
+            bpyMaterial.blend_method = 'BLEND'
+
         bpyMaterials.append(bpyMaterial)
     bpyObjects = []
     for warCraft3Mesh in model.meshes:
         bpyMesh = bpy.data.meshes.new(warCraft3Mesh.name)
         bpyObject = bpy.data.objects.new(warCraft3Mesh.name, bpyMesh)
-        bpy.context.scene.objects.link(bpyObject)
+        bpy.context.collection.objects.link(bpyObject)
         bpyMesh.from_pydata(warCraft3Mesh.vertices, (), warCraft3Mesh.triangles)
-        bpyMesh.uv_textures.new()
+        bpyMesh.uv_layers.new()
         uvLayer = bpyMesh.uv_layers.active.data
         for tris in bpyMesh.polygons:
             for loopIndex in range(tris.loop_start, tris.loop_start + tris.loop_total):
@@ -67,15 +91,9 @@ def create_mesh_objects(model, setTeamColor):
                 uvLayer[loopIndex].uv = (warCraft3Mesh.uvs[vertexIndex])
         bpyMaterial = bpyMaterials[warCraft3Mesh.material_id]
         bpyMesh.materials.append(bpyMaterial)
-        bpyImage = None
-        for textureSlot in bpyMaterial.texture_slots:
-            if textureSlot:
-                bpyImage = textureSlot.texture.image
-        if bpyImage:
-            for triangleID in range(len(bpyObject.data.polygons)):
-                bpyObject.data.uv_textures[0].data[triangleID].image = bpyImage
+
         for vertexGroupId in warCraft3Mesh.vertex_groups_ids:
-            bpyObject.vertex_groups.new(str(vertexGroupId))
+            bpyObject.vertex_groups.new(name=str(vertexGroupId))
         for vertexIndex, vertexGroupIds in enumerate(warCraft3Mesh.vertex_groups):
             for vertexGroupId in vertexGroupIds:
                 bpyObject.vertex_groups[str(vertexGroupId)].add([vertexIndex, ], 1.0, 'REPLACE')
@@ -87,11 +105,11 @@ def create_armature_object(model, bpyObjects, boneSize):
     nodes = model.nodes
     pivotPoints = model.pivot_points
     bpyArmature = bpy.data.armatures.new(model.name + ' Nodes')
-    bpyArmature.draw_type = 'STICK'
+    bpyArmature.display_type = 'STICK'
     bpyObject = bpy.data.objects.new(model.name + ' Nodes', bpyArmature)
-    bpyObject.show_x_ray = True
-    bpy.context.scene.objects.link(bpyObject)
-    bpy.context.scene.objects.active = bpyObject
+    bpyObject.show_in_front = True
+    bpy.context.collection.objects.link(bpyObject)
+    bpy.context.view_layer.objects.active = bpyObject
     bpy.ops.object.mode_set(mode='EDIT')
     nodeTypes = set()
     boneTypes = {}
@@ -119,29 +137,30 @@ def create_armature_object(model, bpyObjects, boneSize):
             boneName = bpyObject.data.edit_bones[vertexGroupIndex].name
             vertexGroup.name = boneName
     bpy.ops.object.mode_set(mode='POSE')
-    boneGroups = {}
+    
+    # Updated for Blender 4.0+ Bone Collections
     for nodeType in nodeTypes:
-        bpy.ops.pose.group_add()
-        boneGroup = bpyObject.pose.bone_groups.active
-        boneGroup.name = nodeType + 's'
-        boneGroups[nodeType] = boneGroup
-        if nodeType == 'bone':
-            boneGroup.color_set = 'THEME04'
-        elif nodeType == 'attachment':
-            boneGroup.color_set = 'THEME09'
-        elif nodeType == 'collision_shape':
-            boneGroup.color_set = 'THEME02'
-        elif nodeType == 'event':
-            boneGroup.color_set = 'THEME03'
-        elif nodeType == 'helper':
-            boneGroup.color_set = 'THEME01'
+        collection_name = nodeType + 's'
+        bone_collection = bpyObject.data.collections.get(collection_name)
+        if not bone_collection:
+            bone_collection = bpyObject.data.collections.new(collection_name)
+        
+        # Map old themes to approximate new usage if possible, or just leave default
+        # Bone Collections in 4.0 don't exactly match old Bone Group themes
+    
     for bone in bpyObject.pose.bones:
         bone.rotation_mode = 'XYZ'
-        bone.bone_group = boneGroups[boneTypes[bone.name]]
+        # Assign to collection based on type
+        node_type = boneTypes[bone.name]
+        collection_name = nodeType + 's'
+        bone_collection = bpyObject.data.collections.get(collection_name)
+        if bone_collection:
+            bone_collection.assign(bone.bone)
+
     for bone in bpyObject.data.bones:
         bone.warcraft_3.nodeType = boneTypes[bone.name].upper()
     bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.context.scene.objects.active = None
+    bpy.context.view_layer.objects.active = None
     return bpyObject
 
 
@@ -159,21 +178,21 @@ def create_armature_actions(armatureObject, model, frameTime):
     for node in nodes:
         boneName = node.node.name
         dataPath = 'pose.bones["' + boneName + '"]'
-        locationFcurveX = action.fcurves.new(dataPath + '.location', 0, boneName)
-        locationFcurveY = action.fcurves.new(dataPath + '.location', 1, boneName)
-        locationFcurveZ = action.fcurves.new(dataPath + '.location', 2, boneName)
+        locationFcurveX = action.fcurves.new(data_path=dataPath + '.location', index=0)
+        locationFcurveY = action.fcurves.new(data_path=dataPath + '.location', index=1)
+        locationFcurveZ = action.fcurves.new(data_path=dataPath + '.location', index=2)
         locationFcurveX.keyframe_points.insert(0.0, 0.0)
         locationFcurveY.keyframe_points.insert(0.0, 0.0)
         locationFcurveZ.keyframe_points.insert(0.0, 0.0)
-        rotationFcurveX = action.fcurves.new(dataPath + '.rotation_euler', 0, boneName)
-        rotationFcurveY = action.fcurves.new(dataPath + '.rotation_euler', 1, boneName)
-        rotationFcurveZ = action.fcurves.new(dataPath + '.rotation_euler', 2, boneName)
+        rotationFcurveX = action.fcurves.new(data_path=dataPath + '.rotation_euler', index=0)
+        rotationFcurveY = action.fcurves.new(data_path=dataPath + '.rotation_euler', index=1)
+        rotationFcurveZ = action.fcurves.new(data_path=dataPath + '.rotation_euler', index=2)
         rotationFcurveX.keyframe_points.insert(0.0, 0.0)
         rotationFcurveY.keyframe_points.insert(0.0, 0.0)
         rotationFcurveZ.keyframe_points.insert(0.0, 0.0)
-        scaleFcurveX = action.fcurves.new(dataPath + '.scale', 0, boneName)
-        scaleFcurveY = action.fcurves.new(dataPath + '.scale', 1, boneName)
-        scaleFcurveZ = action.fcurves.new(dataPath + '.scale', 2, boneName)
+        scaleFcurveX = action.fcurves.new(data_path=dataPath + '.scale', index=0)
+        scaleFcurveY = action.fcurves.new(data_path=dataPath + '.scale', index=1)
+        scaleFcurveZ = action.fcurves.new(data_path=dataPath + '.scale', index=2)
         scaleFcurveX.keyframe_points.insert(0.0, 1.0)
         scaleFcurveY.keyframe_points.insert(0.0, 1.0)
         scaleFcurveZ.keyframe_points.insert(0.0, 1.0)
@@ -198,11 +217,11 @@ def create_armature_actions(armatureObject, model, frameTime):
                     translation = translations.values[index]
                     if intervalStart <= time and time <= intervalEnd:
                         if not locationFcurveX:
-                            locationFcurveX = action.fcurves.new(dataPath + '.location', 0, boneName)
+                            locationFcurveX = action.fcurves.new(data_path=dataPath + '.location', index=0)
                         if not locationFcurveY:
-                            locationFcurveY = action.fcurves.new(dataPath + '.location', 1, boneName)
+                            locationFcurveY = action.fcurves.new(data_path=dataPath + '.location', index=1)
                         if not locationFcurveZ:
-                            locationFcurveZ = action.fcurves.new(dataPath + '.location', 2, boneName)
+                            locationFcurveZ = action.fcurves.new(data_path=dataPath + '.location', index=2)
                         realTime = round((time - intervalStart) / frameTime, 0)
                         locationXKeyframe = locationFcurveX.keyframe_points.insert(realTime, translation[0])
                         locationYKeyframe = locationFcurveY.keyframe_points.insert(realTime, translation[1])
@@ -211,13 +230,13 @@ def create_armature_actions(armatureObject, model, frameTime):
                         locationYKeyframe.interpolation = interpolationType
                         locationZKeyframe.interpolation = interpolationType
                 if not locationFcurveX:
-                    locationFcurveX = action.fcurves.new(dataPath + '.location', 0, boneName)
+                    locationFcurveX = action.fcurves.new(data_path=dataPath + '.location', index=0)
                     locationFcurveX.keyframe_points.insert(0.0, 0.0)
                 if not locationFcurveY:
-                    locationFcurveY = action.fcurves.new(dataPath + '.location', 1, boneName)
+                    locationFcurveY = action.fcurves.new(data_path=dataPath + '.location', index=1)
                     locationFcurveY.keyframe_points.insert(0.0, 0.0)
                 if not locationFcurveZ:
-                    locationFcurveZ = action.fcurves.new(dataPath + '.location', 2, boneName)
+                    locationFcurveZ = action.fcurves.new(data_path=dataPath + '.location', index=2)
                     locationFcurveZ.keyframe_points.insert(0.0, 0.0)
             if rotations:
                 rotationFcurveX = None
@@ -229,11 +248,11 @@ def create_armature_actions(armatureObject, model, frameTime):
                     rotation = rotations.values[index]
                     if intervalStart <= time and time <= intervalEnd:
                         if not rotationFcurveX:
-                            rotationFcurveX = action.fcurves.new(dataPath + '.rotation_euler', 0, boneName)
+                            rotationFcurveX = action.fcurves.new(data_path=dataPath + '.rotation_euler', index=0)
                         if not rotationFcurveY:
-                            rotationFcurveY = action.fcurves.new(dataPath + '.rotation_euler', 1, boneName)
+                            rotationFcurveY = action.fcurves.new(data_path=dataPath + '.rotation_euler', index=1)
                         if not rotationFcurveZ:
-                            rotationFcurveZ = action.fcurves.new(dataPath + '.rotation_euler', 2, boneName)
+                            rotationFcurveZ = action.fcurves.new(data_path=dataPath + '.rotation_euler', index=2)
                         realTime = round((time - intervalStart) / frameTime, 0)
                         euler = mathutils.Quaternion(mathutils.Vector(rotation)).to_euler('XYZ')
                         rotationXKeyframe = rotationFcurveX.keyframe_points.insert(realTime, euler[0])
@@ -243,13 +262,13 @@ def create_armature_actions(armatureObject, model, frameTime):
                         rotationYKeyframe.interpolation = interpolationType
                         rotationZKeyframe.interpolation = interpolationType
                 if not rotationFcurveX:
-                    rotationFcurveX = action.fcurves.new(dataPath + '.rotation_euler', 0, boneName)
+                    rotationFcurveX = action.fcurves.new(data_path=dataPath + '.rotation_euler', index=0)
                     rotationFcurveX.keyframe_points.insert(0.0, 0.0)
                 if not rotationFcurveY:
-                    rotationFcurveY = action.fcurves.new(dataPath + '.rotation_euler', 1, boneName)
+                    rotationFcurveY = action.fcurves.new(data_path=dataPath + '.rotation_euler', index=1)
                     rotationFcurveY.keyframe_points.insert(0.0, 0.0)
                 if not rotationFcurveZ:
-                    rotationFcurveZ = action.fcurves.new(dataPath + '.rotation_euler', 2, boneName)
+                    rotationFcurveZ = action.fcurves.new(data_path=dataPath + '.rotation_euler', index=2)
                     rotationFcurveZ.keyframe_points.insert(0.0, 0.0)
             if scalings:
                 scaleFcurveX = None
@@ -261,11 +280,11 @@ def create_armature_actions(armatureObject, model, frameTime):
                     scale = scalings.values[index]
                     if intervalStart <= time and time <= intervalEnd:
                         if not scaleFcurveX:
-                            scaleFcurveX = action.fcurves.new(dataPath + '.scale', 0, boneName)
+                            scaleFcurveX = action.fcurves.new(data_path=dataPath + '.scale', index=0)
                         if not scaleFcurveY:
-                            scaleFcurveY = action.fcurves.new(dataPath + '.scale', 1, boneName)
+                            scaleFcurveY = action.fcurves.new(data_path=dataPath + '.scale', index=1)
                         if not scaleFcurveZ:
-                            scaleFcurveZ = action.fcurves.new(dataPath + '.scale', 2, boneName)
+                            scaleFcurveZ = action.fcurves.new(data_path=dataPath + '.scale', index=2)
                         realTime = round((time - intervalStart) / frameTime, 0)
                         scaleXKeyframe = scaleFcurveX.keyframe_points.insert(realTime, scale[0])
                         scaleYKeyframe = scaleFcurveY.keyframe_points.insert(realTime, scale[1])
@@ -274,13 +293,13 @@ def create_armature_actions(armatureObject, model, frameTime):
                         scaleYKeyframe.interpolation = interpolationType
                         scaleZKeyframe.interpolation = interpolationType
                 if not scaleFcurveX:
-                    scaleFcurveX = action.fcurves.new(dataPath + '.scale', 0, boneName)
+                    scaleFcurveX = action.fcurves.new(data_path=dataPath + '.scale', index=0)
                     scaleFcurveX.keyframe_points.insert(0.0, 1.0)
                 if not scaleFcurveY:
-                    scaleFcurveY = action.fcurves.new(dataPath + '.scale', 1, boneName)
+                    scaleFcurveY = action.fcurves.new(data_path=dataPath + '.scale', index=1)
                     scaleFcurveY.keyframe_points.insert(0.0, 1.0)
                 if not scaleFcurveZ:
-                    scaleFcurveZ = action.fcurves.new(dataPath + '.scale', 2, boneName)
+                    scaleFcurveZ = action.fcurves.new(data_path=dataPath + '.scale', index=2)
                     scaleFcurveZ.keyframe_points.insert(0.0, 1.0)
 
 
@@ -291,10 +310,10 @@ def create_object_actions(model, bpyObjects, frameTime):
     for geosetAnimation in geosetAnimations:
         geosetId = geosetAnimation.geoset_id
         action = bpy.data.actions.new(name='#UNANIMATED' + ' ' + bpyObjects[geosetId].name)
-        colorR = action.fcurves.new(dataPathColor, 0)
-        colorG = action.fcurves.new(dataPathColor, 1)
-        colorB = action.fcurves.new(dataPathColor, 2)
-        colorA = action.fcurves.new(dataPathColor, 3)
+        colorR = action.fcurves.new(data_path=dataPathColor, index=0)
+        colorG = action.fcurves.new(data_path=dataPathColor, index=1)
+        colorB = action.fcurves.new(data_path=dataPathColor, index=2)
+        colorA = action.fcurves.new(data_path=dataPathColor, index=3)
         colorR.keyframe_points.insert(0.0, 1.0)
         colorG.keyframe_points.insert(0.0, 1.0)
         colorB.keyframe_points.insert(0.0, 1.0)
@@ -317,11 +336,11 @@ def create_object_actions(model, bpyObjects, frameTime):
                 color = colorAnim.values[index]
                 if intervalStart <= time and time <= intervalEnd or time == 0:
                     if not colorR:
-                        colorR = action.fcurves.new(dataPathColor, 0)
+                        colorR = action.fcurves.new(data_path=dataPathColor, index=0)
                     if not colorG:
-                        colorG = action.fcurves.new(dataPathColor, 1)
+                        colorG = action.fcurves.new(data_path=dataPathColor, index=1)
                     if not colorB:
-                        colorB = action.fcurves.new(dataPathColor, 2)
+                        colorB = action.fcurves.new(data_path=dataPathColor, index=2)
                     if time == 0:
                         realTime = 0.0
                     else:
@@ -333,13 +352,13 @@ def create_object_actions(model, bpyObjects, frameTime):
                     colorGKeyframe.interpolation = interpolationType
                     colorBKeyframe.interpolation = interpolationType
             if not colorR:
-                colorR = action.fcurves.new(dataPathColor, 0)
+                colorR = action.fcurves.new(data_path=dataPathColor, index=0)
                 colorR.keyframe_points.insert(0, 1.0)
             if not colorG:
-                colorG = action.fcurves.new(dataPathColor, 1)
+                colorG = action.fcurves.new(data_path=dataPathColor, index=1)
                 colorG.keyframe_points.insert(0, 1.0)
             if not colorB:
-                colorB = action.fcurves.new(dataPathColor, 2)
+                colorB = action.fcurves.new(data_path=dataPathColor, index=2)
                 colorB.keyframe_points.insert(0, 1.0)
             interpolationType = constants.INTERPOLATION_TYPE_NAMES[alphaAnim.interpolation_type]
             for index in range(alphaAnim.tracks_count):
@@ -347,7 +366,7 @@ def create_object_actions(model, bpyObjects, frameTime):
                 alpha = alphaAnim.values[index]
                 if intervalStart <= time and time <= intervalEnd or time == 0:
                     if not colorA:
-                        colorA = action.fcurves.new(dataPathColor, 3)
+                        colorA = action.fcurves.new(data_path=dataPathColor, index=3)
                     if time == 0:
                         realTime = 0.0
                     else:
@@ -355,5 +374,5 @@ def create_object_actions(model, bpyObjects, frameTime):
                     colorAKeyframe = colorA.keyframe_points.insert(realTime, alpha)
                     colorAKeyframe.interpolation = interpolationType
             if not colorA:
-                colorA = action.fcurves.new(dataPathColor, 3)
+                colorA = action.fcurves.new(data_path=dataPathColor, index=3)
                 colorA.keyframe_points.insert(0, 1.0)

@@ -121,4 +121,14 @@ class MDXImportProperties:
     def calculate_frame_time(self):
         if not self.use_custom_fps:
             self.fps = bpy.context.scene.render.fps
-        self.frame_time = 1000 / self.fps
+        
+        # Ensure self.fps is a float or int, not a Blender property
+        try:
+            fps_val = float(self.fps)
+        except TypeError:
+            fps_val = 30.0 # Default fallback
+            
+        if fps_val <= 0:
+            fps_val = 30.0
+            
+        self.frame_time = 1000.0 / fps_val

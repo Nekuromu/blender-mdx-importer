@@ -7,7 +7,8 @@ ACTION_NAME_UNANIMATED = '#UNANIMATED'
 
 
 def set_animation(self, context):
-    setAnimationName = context.armature.warcraft_3.sequencesList[context.armature.warcraft_3.sequencesListIndex].name
+    armature_data = context.object.data
+    setAnimationName = armature_data.warcraft_3.sequencesList[armature_data.warcraft_3.sequencesListIndex].name
     if len(setAnimationName) and bpy.data.actions.get(setAnimationName, None):
         armatureObject = context.object
         if armatureObject.animation_data == None:
@@ -49,23 +50,21 @@ def set_bone_node_type(self, context):
     bone = context.active_bone
     if bone:
         nodeType = bone.warcraft_3.nodeType
-        object = context.object
-        boneGroup = object.pose.bone_groups.get(nodeType.lower() + 's', None)
-        if not boneGroup:
-            if nodeType in {'BONE', 'ATTACHMENT', 'COLLISION_SHAPE', 'EVENT', 'HELPER'}:
-                bpy.ops.pose.group_add()
-                boneGroup = object.pose.bone_groups.active
-                boneGroup.name = nodeType.lower() + 's'
-                if nodeType == 'BONE':
-                    boneGroup.color_set = 'THEME04'
-                elif nodeType == 'ATTACHMENT':
-                    boneGroup.color_set = 'THEME09'
-                elif nodeType == 'COLLISION_SHAPE':
-                    boneGroup.color_set = 'THEME02'
-                elif nodeType == 'EVENT':
-                    boneGroup.color_set = 'THEME03'
-                elif nodeType == 'HELPER':
-                    boneGroup.color_set = 'THEME01'
-            else:
-                boneGroup = None
-        object.pose.bones[bone.name].bone_group = boneGroup
+        obj = context.object
+        if obj and obj.type == 'ARMATURE':
+            collection_name = nodeType.lower() + 's'
+            bone_collection = obj.data.collections.get(collection_name)
+            
+            if not bone_collection:
+                if nodeType in {'BONE', 'ATTACHMENT', 'COLLISION_SHAPE', 'EVENT', 'HELPER'}:
+                    bone_collection = obj.data.collections.new(collection_name)
+            
+            if bone_collection:
+                # Remove from other collections first? 
+                # For now just assign to the new one, bones can be in multiple.
+                # But to emulate old behavior (single group), we might want to unassign from others?
+                # Keeping it simple: Just assign.
+                if hasattr(bone, "bone"): # PoseBone
+                    bone_collection.assign(bone.bone)
+                else: # Bone or EditBone
+                    bone_collection.assign(bone)

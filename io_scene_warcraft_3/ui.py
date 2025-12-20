@@ -10,12 +10,12 @@ class WarCraft3PanelArmature(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return context.armature
+        return context.object and context.object.type == 'ARMATURE' and context.object.data
 
     def draw(self, context):
-        warcraft3data = context.armature.warcraft_3
+        warcraft3data = context.object.data.warcraft_3
         layout = self.layout
-        layout.label('Animations:')
+        layout.label(text='Animations:')
         row = layout.row()
         row.template_list(
             listtype_name='UI_UL_list',
@@ -27,8 +27,8 @@ class WarCraft3PanelArmature(bpy.types.Panel):
             rows=2
             )
         col = row.column(align=True)
-        col.operator('warcraft_3.add_sequence_to_armature', icon='ZOOMIN', text='')
-        col.operator('warcraft_3.remove_sequence_to_armature', icon='ZOOMOUT', text='')
+        col.operator('warcraft_3.add_sequence_to_armature', icon='ADD', text='')
+        col.operator('warcraft_3.remove_sequence_to_armature', icon='REMOVE', text='')
 
 
 class WarCraft3PanelBone(bpy.types.Panel):

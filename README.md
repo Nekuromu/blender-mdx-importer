@@ -1,11 +1,7 @@
-## Blender WarCraft 3
+## Blender WarCraft 3 .mdx importer
 
-This is an addon for the [Blender](http://www.blender.org/) that allows you to import `3D` models and animations from the game `WarCraft 3`.
+This is an addon for [Blender](http://www.blender.org/) that allows you to import `.mdx` models and animations from the game `WarCraft 3`.
 
-Only `*.mdx` import is supported.
+The addon will work in `Blender` `4.5.4 LTS`.
 
-The first version of the addon was written in October 2016.
-
-The addon will work in `Blender` `2.78`.
-
-First, the addon was published on the [xgm.guru](https://xgm.guru/p/wc3/blender-warcraft-3) site.
+This is a fork of [PavelBlends](https://github.com/PavelBlend/Blender_WarCraft-3) version, that only supported Blender 2.79
