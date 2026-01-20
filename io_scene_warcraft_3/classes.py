@@ -117,6 +117,7 @@ class MDXImportProperties:
         self.use_custom_fps = False
         self.fps = 30
         self.frame_time = 1.0
+        self.global_scale = 0.03
 
     def calculate_frame_time(self):
         if not self.use_custom_fps:

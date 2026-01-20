@@ -18,6 +18,13 @@ class WarCraft3OperatorImportMDX(bpy.types.Operator, io_utils.ImportHelper):
     filepath: bpy.props.StringProperty(name='File Path', maxlen=1024, default='')
     useCustomFPS: bpy.props.BoolProperty(name='Use Custom FPS', default=False)
     animationFPS: bpy.props.FloatProperty(name='Animation FPS', default=30.0, min=1.0, max=1000.0)
+    globalScale: bpy.props.FloatProperty(
+        name='Global Scale',
+        default=0.03,
+        min=0.0001,
+        max=1000.0,
+        description="Scale the model on import (0.03 is good for Warcraft III models)"
+    )
     boneSize: bpy.props.FloatProperty(name='Bone Size', default=5.0, min=0.0001, max=1000.0)
     teamColor: bpy.props.FloatVectorProperty(
         name='Team Color',
@@ -56,6 +63,7 @@ class WarCraft3OperatorImportMDX(bpy.types.Operator, io_utils.ImportHelper):
         subSplit.label(text='Team Color:')
         subSplit.prop(self, 'setTeamColor', text='')
         split.prop(self, 'teamColor', text='')
+        layout.prop(self, 'globalScale')
         layout.prop(self, 'boneSize')
         layout.prop(self, 'useCustomFPS')
         if self.useCustomFPS:
@@ -68,6 +76,7 @@ class WarCraft3OperatorImportMDX(bpy.types.Operator, io_utils.ImportHelper):
         importProperties.bone_size = float(self.boneSize)
         importProperties.use_custom_fps = bool(self.useCustomFPS)
         importProperties.fps = float(self.animationFPS)
+        importProperties.global_scale = float(self.globalScale)
         importProperties.calculate_frame_time()
         parser.load_mdx(importProperties)
         return {'FINISHED'}
