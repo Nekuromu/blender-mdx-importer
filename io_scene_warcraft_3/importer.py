@@ -12,7 +12,7 @@ def load_warcraft_3_model(model, importProperties):
 
 
 def create_mesh_objects(model, setTeamColor):
-    preferences = bpy.context.preferences.addons['plugin'].preferences
+    preferences = bpy.context.preferences.addons['io_scene_warcraft_3'].preferences
     
     # Safely get string properties
     resourceFolder = getattr(preferences, 'resourceFolder', '')
