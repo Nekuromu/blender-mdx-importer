@@ -1,18 +1,30 @@
 
 import bpy
 import mathutils
+import math
 from . import constants
 
 
 def load_warcraft_3_model(model, importProperties):
     bpyObjects = create_mesh_objects(model, importProperties.set_team_color)
     armatureObject = create_armature_object(model, bpyObjects, importProperties.bone_size)
+
+    if hasattr(importProperties, 'global_scale'):
+        s = importProperties.global_scale
+        armatureObject.scale = (s, s, s)
+
+        for obj in bpyObjects:
+            obj.rotation_euler[2] = -math.radians(90.0)
+            obj.scale = (s, s, s)
+    
+    armatureObject.rotation_euler[2] = -math.radians(90.0)
+
     create_armature_actions(armatureObject, model, importProperties.frame_time)
     create_object_actions(model, bpyObjects, importProperties.frame_time)
 
 
 def create_mesh_objects(model, setTeamColor):
-    preferences = bpy.context.preferences.addons['plugin'].preferences
+    preferences = bpy.context.preferences.addons['io_scene_warcraft_3'].preferences
     
     # Safely get string properties
     resourceFolder = getattr(preferences, 'resourceFolder', '')
